@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reunião</title>
+    <style>
+        video {
+            width: 45%;
+            margin: 5px;
+            border: 1px solid #ccc;
+        }
+        #chatContainer {
+            margin-top: 20px;
+        }
+        #chatMessages {
+            list-style-type: none;
+            padding: 0;
+            max-height: 200px;
+            overflow-y: scroll;
+            border: 1px solid #ccc;
+        }
+        #chatMessages li {
+            padding: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <h1>Reunião</h1>
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+
+    <div id="chatContainer">
+        <input id="messageInput" type="text" placeholder="Digite sua mensagem..." />
+        <button id="sendMessageButton">Enviar</button>
+        <ul id="chatMessages"></ul>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io('http://localhost:3000');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const messageInput = document.getElementById('messageInput');
+        const sendMessageButton = document.getElementById('sendMessageButton');
+        const chatMessages = document.getElementById('chatMessages');
+
+        let localStream;
+        let peerConnection;
+
+        const peerConnectionConfig = {
+            iceServers: [
+                { url: 'stun:stun.l.google.com:19302' } // STUN server
+            ]
+        };
+
+        // Solicitar acesso à câmera e microfone
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                localStream = stream; // Armazena o stream local
+                localVideo.srcObject = localStream; // Exibe o vídeo local
+
+                // Criar uma nova conexão
+                peerConnection = new RTCPeerConnection(peerConnectionConfig);
+
+                // Adicionar o stream local à conexão
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+
+                // Ouvir eventos de track
+                peerConnection.ontrack = (event) => {
+                    remoteVideo.srcObject = event.streams[0]; // Exibe o vídeo remoto
+                };
+
+                // Enviar sinalizações para o servidor
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        socket.emit('signal', { to: 'RECEIVER_ID', candidate: event.candidate }); // Substitua 'RECEIVER_ID' dinamicamente
+                    }
+                };
+
+                // Criar a oferta
+                peerConnection.createOffer()
+                    .then(offer => {
+                        return peerConnection.setLocalDescription(offer);
+                    })
+                    .then(() => {
+                        // Enviar a oferta ao servidor
+                        socket.emit('signal', { to: 'RECEIVER_ID', offer: peerConnection.localDescription }); // Substitua 'RECEIVER_ID' dinamicamente
+                    })
+                    .catch(error => {
+                        console.error('Erro ao criar a oferta:', error);
+                    });
+            })
+            .catch(error => {
+                if (error.name === 'NotReadableError') {
+                    console.error('A câmera ou microfone já está em uso em outra aba/navegador.');
+                } else {
+                    console.error('Erro ao acessar a câmera ou microfone:', error);
+                }
+            });
+
+        // Lidar com a sinalização recebida
+        socket.on('signal', (data) => {
+            if (data.offer) {
+                // Se receber uma oferta, responder
+                peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer))
+                    .then(() => {
+                        return peerConnection.createAnswer();
+                    })
+                    .then(answer => {
+                        return peerConnection.setLocalDescription(answer);
+                    })
+                    .then(() => {
+                        // Enviar a resposta ao servidor
+                        socket.emit('signal', { to: data.from, answer: peerConnection.localDescription });
+                    })
+                    .catch(error => {
+                        console.error('Erro ao lidar com a oferta:', error);
+                    });
+            }
+
+            if (data.answer) {
+                // Se receber uma resposta, definir a descrição remota
+                peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer))
+                    .catch(error => {
+                        console.error('Erro ao definir a resposta remota:', error);
+                    });
+            }
+
+            if (data.candidate) {
+                // Se receber um candidato ICE, adicionar à conexão
+                peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate))
+                    .catch(error => {
+                        console.error('Erro ao adicionar candidato ICE:', error);
+                    });
+            }
+        });
+
+        // Enviar mensagem de chat
+        sendMessageButton.addEventListener('click', () => {
+            const message = messageInput.value;
+            if (message) {
+                socket.emit('chat-message', message); // Envia a mensagem pelo socket
+                addMessageToChat(`Você: ${message}`); // Adiciona a mensagem enviada à lista
+                messageInput.value = ''; // Limpa o campo de entrada
+            }
+        });
+
+        // Receber mensagem de chat
+        socket.on('chat-message', (message) => {
+            addMessageToChat(message); // Adiciona a mensagem recebida à lista
+        });
+
+        // Função para adicionar mensagem ao chat
+        function addMessageToChat(message) {
+            const li = document.createElement('li');
+            li.textContent = message; // Adiciona a mensagem recebida à lista
+            chatMessages.appendChild(li);
+            chatMessages.scrollTop = chatMessages.scrollHeight; // Rolagem automática para o final
+        }
+    </script>
+</body>
+</html>
