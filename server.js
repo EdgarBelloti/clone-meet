@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const bodyParser = require('body-parser');
 const authRoutes = require('./routes/auth');
-const roomRoutes = require('./routes/room'); 
+const roomRoutes = require('./routes/room');
 const http = require('http');
 const setupSwagger = require('./swagger'); // Importando o setupSwagger
 const socketIo = require('socket.io'); // Importando o Socket.io
@@ -14,12 +14,12 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // Conectando ao MongoDB
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('Conectado ao MongoDB'))
-  .catch((err) => console.log('Erro ao conectar ao MongoDB:', err));
+mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+    .then(() => console.log('Conectado ao MongoDB'))
+    .catch((err) => console.log('Erro ao conectar ao MongoDB:', err));
 
 // Criando o servidor HTTP
-const server = http.createServer(app); 
+const server = http.createServer(app);
 
 // Inicializando o Socket.io
 const io = socketIo(server);
@@ -52,7 +52,7 @@ io.on('connection', (socket) => {
     // Desconectar o usuário
     socket.on('disconnect', () => {
         console.log('Usuário desconectado:', socket.id);
-        // Aqui você pode emitir um evento para notificar outros usuários sobre a desconexão
+        // Emitir um evento para notificar outros usuários sobre a desconexão
         socket.broadcast.emit('user-disconnected', socket.id);
     });
 });
@@ -67,7 +67,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use('/api/auth', authRoutes);
 
 // Rotas de salas de reunião
-app.use('/api/rooms', roomRoutes); 
+app.use('/api/rooms', roomRoutes);
 
 // Rota de teste
 app.get('/', (req, res) => {

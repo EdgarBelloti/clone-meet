@@ -1,16 +1,60 @@
 const express = require('express');
 const router = express.Router();
-const Room = require('../models/Room');
-const authMiddleware = require('../middleware/authMiddleware');
-const { io } = require('../server'); // Certifique-se de que o Socket.io está acessível
+const Room = require('../models/Room'); // Certifique-se de que o modelo Room está corretamente importado
+const authMiddleware = require('../middleware/authMiddleware'); // Middleware para autenticação
+
+/**
+ * @swagger
+ * /api/rooms:
+ *   post:
+ *     tags: [Rooms]
+ *     summary: Criar uma nova sala de reunião
+ *     description: Permite que um usuário crie uma nova sala de reunião.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: "Reunião de Projetos" # Exemplo de nome da sala
+ *               capacity:
+ *                 type: number
+ *                 example: 10 # Exemplo de capacidade da sala
+ *     responses:
+ *       201:
+ *         description: Sala criada com sucesso.
+ *       400:
+ *         description: Dados inválidos.
+ *       500:
+ *         description: Erro ao criar a sala.
+ */
+router.post('/', authMiddleware, async (req, res) => {
+    const { name, capacity } = req.body;
+
+    if (!name) {
+        return res.status(400).json({ message: 'O nome da sala é necessário.' });
+    }
+
+    try {
+        const room = new Room({ name, capacity, participants: [] });
+        await room.save();
+        res.status(201).json({ message: 'Sala criada com sucesso.', room });
+    } catch (error) {
+        console.error('Erro ao criar a sala:', error);
+        res.status(500).json({ message: 'Erro ao criar a sala.' });
+    }
+});
 
 /**
  * @swagger
  * /api/rooms/join:
  *   post:
  *     tags: [Rooms]
- *     summary: Juntar-se a uma sala de reunião
- *     description: Permite que um usuário entre em uma sala de reunião existente.
+ *     summary: Entrar em uma sala de reunião
+ *     description: Permite que um usuário entre em uma sala de reunião.
  *     requestBody:
  *       required: true
  *       content:
@@ -20,12 +64,10 @@ const { io } = require('../server'); // Certifique-se de que o Socket.io está a
  *             properties:
  *               roomId:
  *                 type: string
- *                 example: "60d5f484f10f4a29e0f5f5a6" # Exemplo de ID de sala
+ *                 example: "ID_DA_SALA" # Exemplo de ID da sala
  *     responses:
  *       200:
  *         description: Usuário entrou na sala com sucesso.
- *       400:
- *         description: O roomId é necessário.
  *       404:
  *         description: Sala não encontrada.
  *       500:
@@ -35,7 +77,7 @@ router.post('/join', authMiddleware, async (req, res) => {
     const { roomId } = req.body;
 
     if (!roomId) {
-        return res.status(400).json({ message: 'O roomId é necessário.' });
+        return res.status(400).json({ message: 'O ID da sala é necessário.' });
     }
 
     try {
@@ -44,23 +86,10 @@ router.post('/join', authMiddleware, async (req, res) => {
             return res.status(404).json({ message: 'Sala não encontrada.' });
         }
 
-        const userId = req.user.id;
+        room.participants.push(req.user.id); // Adicione o ID do usuário aos participantes
+        await room.save();
 
-        if (!room.participants.includes(userId)) {
-            room.participants.push(userId);
-            await room.save();
-
-            // Emitir o evento 'join-room'
-            if (io) {
-                io.to(roomId).emit('join-room', { userId, roomId });
-            } else {
-                console.error('Socket.io não está definido.');
-            }
-
-            return res.status(200).json({ message: 'Você entrou na sala com sucesso.', room });
-        } else {
-            return res.status(400).json({ message: 'Você já está participando desta sala.' });
-        }
+        res.status(200).json({ message: 'Você entrou na sala com sucesso.', room });
     } catch (error) {
         console.error('Erro ao entrar na sala:', error);
         res.status(500).json({ message: 'Erro ao entrar na sala.' });
@@ -83,12 +112,10 @@ router.post('/join', authMiddleware, async (req, res) => {
  *             properties:
  *               roomId:
  *                 type: string
- *                 example: "60d5f484f10f4a29e0f5f5a6" # Exemplo de ID de sala
+ *                 example: "ID_DA_SALA" # Exemplo de ID da sala
  *     responses:
  *       200:
  *         description: Usuário saiu da sala com sucesso.
- *       400:
- *         description: O roomId é necessário.
  *       404:
  *         description: Sala não encontrada.
  *       500:
@@ -98,7 +125,7 @@ router.post('/leave', authMiddleware, async (req, res) => {
     const { roomId } = req.body;
 
     if (!roomId) {
-        return res.status(400).json({ message: 'O roomId é necessário.' });
+        return res.status(400).json({ message: 'O ID da sala é necessário.' });
     }
 
     try {
@@ -107,27 +134,15 @@ router.post('/leave', authMiddleware, async (req, res) => {
             return res.status(404).json({ message: 'Sala não encontrada.' });
         }
 
-        const userId = req.user.id;
+        room.participants = room.participants.filter(participant => participant !== req.user.id);
+        await room.save();
 
-        if (room.participants.includes(userId)) {
-            room.participants = room.participants.filter(id => id !== userId);
-            await room.save();
-
-            // Emitir o evento 'leave-room'
-            if (io) {
-                io.to(roomId).emit('leave-room', { userId, roomId });
-            } else {
-                console.error('Socket.io não está definido.');
-            }
-
-            return res.status(200).json({ message: 'Você saiu da sala com sucesso.', room });
-        } else {
-            return res.status(400).json({ message: 'Você não está participando desta sala.' });
-        }
+        res.status(200).json({ message: 'Você saiu da sala com sucesso.', room });
     } catch (error) {
         console.error('Erro ao sair da sala:', error);
         res.status(500).json({ message: 'Erro ao sair da sala.' });
     }
 });
 
+// Exporte as rotas
 module.exports = router;
